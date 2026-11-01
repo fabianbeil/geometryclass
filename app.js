@@ -1,5 +1,5 @@
 import { createState } from "./state.js";
-import { drawScene, pointerPos, screenToWorld, localToScreen, insideRuler, snapPoint, eraseAt } from "./geometry.js";
+import { drawScene, pointerPos, screenToWorld, localToScreen, insideRuler, snapPoint, eraseAt, worldToLocal } from "./geometry.js";
 import { bindUI, syncControls } from "./ui.js";
 import { saveDrawingToFile, loadDrawingFromFile } from "./storage.js";
 
@@ -8,12 +8,20 @@ const ctx = canvas.getContext("2d");
 const body = document.body;
 const state = createState();
 
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+}
+
 function redraw() {
   drawScene(ctx, canvas, body, state);
   syncControls(state);
 }
 
 bindUI({ canvas, body, state, onRedraw: redraw });
+resizeCanvas();
 
 canvas.addEventListener("pointerdown", event => {
   const screen = pointerPos(event, canvas);
@@ -80,7 +88,7 @@ canvas.addEventListener("pointermove", event => {
     state.ruler.y = world.y - state.drag.offsetY;
   } else if (state.drag?.kind === "rotate") {
     const zero = { x: state.ruler.w / 2, y: 0 };
-    const fixedZero = localToWorld(state.ruler, zero.x, zero.y);
+    const fixedZero = localToScreen(state, state.ruler, zero.x, zero.y);
     state.ruler.angle = Math.atan2(world.y - fixedZero.y, world.x - fixedZero.x) + Math.PI / 2;
     const c = Math.cos(state.ruler.angle);
     const s = Math.sin(state.ruler.angle);
@@ -119,11 +127,16 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("resize", () => {
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.round(rect.width * (window.devicePixelRatio || 1));
-  canvas.height = Math.round(rect.height * (window.devicePixelRatio || 1));
+  resizeCanvas();
   redraw();
 });
 
-lucide.createIcons();
+window.addEventListener("load", () => {
+  resizeCanvas();
+  redraw();
+});
+
+if (typeof lucide !== "undefined" && lucide.createIcons) {
+  lucide.createIcons();
+}
 redraw();
