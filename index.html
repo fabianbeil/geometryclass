@@ -281,32 +281,38 @@ body.dark .color-swatch.standard {
       }
 
       function drawGrid() {
-        const dark = body.classList.contains("dark");
-        const w = canvas.width / dpr(), h = canvas.height / dpr();
-        const left = -panX / zoom, top = -panY / zoom;
-        const right = left + w / zoom, bottom = top + h / zoom;
-        const x0 = Math.floor(left / grid) * grid;
-        const y0 = Math.floor(top / grid) * grid;
+  const dark = body.classList.contains("dark");
+  const w = canvas.width / dpr();
+  const h = canvas.height / dpr();
 
-        ctx.fillStyle = dark ? "#171a20" : "#fff";
-        ctx.fillRect(left, top, right - left, bottom - top);
+  const left = -panX / zoom;
+  const top = -panY / zoom;
+  const right = left + w / zoom;
+  const bottom = top + h / zoom;
+  const x0 = Math.floor(left / grid) * grid;
+  const y0 = Math.floor(top / grid) * grid;
 
-        ctx.lineWidth = 1.5 / zoom;
-        for (let x = x0; x <= right; x += grid) {
-          const major = Math.round(x / grid) % 5 === 0;
-          ctx.strokeStyle = dark
-            ? (major ? "#3c4550" : "#2a3038")
-            : (major ? "#c0d2ea" : "#e7edf4");
-          ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
-        }
-        for (let y = y0; y <= bottom; y += grid) {
-          const major = Math.round(y / grid) % 5 === 0;
-          ctx.strokeStyle = dark
-            ? (major ? "#3c4550" : "#2a3038")
-            : (major ? "#c0d2ea" : "#e7edf4");
-          ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
-        }
-      }
+  ctx.fillStyle = dark ? "#171a20" : "#fff";
+  ctx.fillRect(left, top, right - left, bottom - top);
+
+  ctx.lineWidth = 1.5 / zoom;
+  ctx.strokeStyle = dark ? "#343b45" : "#dce3eb";
+
+  for (let x = x0; x <= right; x += grid) {
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+  }
+
+  for (let y = y0; y <= bottom; y += grid) {
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(right, y);
+    ctx.stroke();
+  }
+}
+
 
       function drawStrokes() {
         for (const stroke of strokes) {
