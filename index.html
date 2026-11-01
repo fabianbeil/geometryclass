@@ -224,7 +224,7 @@ body.dark .color-swatch.standard {
       const grid = 30; // Ein Kästchen in Weltkoordinaten
       const cm = 2 * grid; // 1 cm entspricht immer zwei Kästchen
 
-      let zoom = 0.7;
+      let zoom = 1.05;
       let panX = 90, panY = 180;
       let tool = "pen";
       let strokes = [];
@@ -291,19 +291,19 @@ body.dark .color-swatch.standard {
         ctx.fillStyle = dark ? "#171a20" : "#fff";
         ctx.fillRect(left, top, right - left, bottom - top);
 
-        ctx.lineWidth = 1 / zoom;
+        ctx.lineWidth = 1.5 / zoom;
         for (let x = x0; x <= right; x += grid) {
           const major = Math.round(x / grid) % 5 === 0;
           ctx.strokeStyle = dark
-            ? (major ? "#343b47" : "#252b34")
-            : (major ? "#cbd8e8" : "#e7edf4");
+            ? (major ? "#3c4550" : "#2a3038")
+            : (major ? "#c0d2ea" : "#e7edf4");
           ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
         }
         for (let y = y0; y <= bottom; y += grid) {
           const major = Math.round(y / grid) % 5 === 0;
           ctx.strokeStyle = dark
-            ? (major ? "#343b47" : "#252b34")
-            : (major ? "#cbd8e8" : "#e7edf4");
+            ? (major ? "#3c4550" : "#2a3038")
+            : (major ? "#c0d2ea" : "#e7edf4");
           ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
         }
       }
