@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Geometrie-Konstruktionen</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --toolbar: #f5f6f8;
+      --text: #202124;
+      --border: #c8ccd2;
+      --button: #fff;
+      --active: #dcecff;
+    }
+    body.dark {
+      color-scheme: dark;
+      --toolbar: #20242b;
+      --text: #eef1f5;
+      --border: #414852;
+      --button: #303640;
+      --active: #294668;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font: 14px system-ui, sans-serif;
+      background: #fff;
+    }
+    #toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      align-items: center;
+      padding: 9px;
+      background: var(--toolbar);
+      border-bottom: 1px solid var(--border);
+    }
+    button, select, input {
+      color: var(--text);
+      background: var(--button);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font: inherit;
+    }
+    button { cursor: pointer; }
+    button.active { background: var(--active); border-color: #6099d4; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    #status {
+      margin-left: auto;
+      opacity: .75;
+      font-size: 12px;
+    }
+    #canvas {
+      display: block;
+      width: 100vw;
+      height: calc(100vh - 58px);
+      touch-action: none;
+      cursor: crosshair;
+    }
+    body.dark { background: #171a20; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button data-tool="pen" class="active">✎ Stift</button>
+    <label>Strich
+      <select id="thickness">
+        <option value="2">Fein</option>
+        <option value="4" selected>Mittel</option>
+        <option value="8">Dick</option>
+        <option value="14">Sehr dick</option>
+      </select>
+    </label>
+    <button data-tool="eraser">⌫ Radierer</button>
+    <label>Radieren
+      <select id="eraseMode">
+        <option value="partial">Bereich unter Cursor</option>
+        <option value="whole">Ganze Linie</option>
+      </select>
+    </label>
+    <button data-tool="pan">✥ Verschieben</button>
+    <button id="rulerButton">△ Geodreieck</button>
+    <button id="compassButton" disabled title="Wird später ergänzt">⊙ Zirkel (später)</button>
+    <button id="themeButton">☾ Dark Theme</button>
+    <button id="clearButton">Alles löschen</button>
+    <span id="status">Mausrad: Zoom · Verschieben: Werkzeug oder mittlere Maustaste</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    (() => {
+      const canvas = document.querySelector("#canvas");
+      const ctx = canvas.getContext("2d");
+      const body = document.body;
+      const grid = 30; // Ein Kästchen in Weltkoordinaten
+      const cm = 2 * grid; // 1 cm entspricht immer zwei Kästchen
+
+      let zoom = 0.7;
+      let panX = 90, panY = 180;
+      let tool = "pen";
+      let strokes = [];
+      let activeStroke = null;
+      let pointerDown = false;
+      let drag = null;
+      let ruler = {
+        visible: false,
+        x: 180, y: 320,
+        w: 600, h: 300,
+        angle: 0
+      };
+
+      const dpr = () => window.devicePixelRatio || 1;
+
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.round(rect.width * dpr());
+        canvas.height = Math.round(rect.height * dpr());
+        draw();
+      }
+      window.addEventListener("resize", resize);
+
+      function screenToWorld(sx, sy) {
+        return { x: (sx - panX) / zoom, y: (sy - panY) / zoom };
+      }
+      function worldToScreen(p) {
+        return { x: p.x * zoom + panX, y: p.y * zoom + panY };
+      }
+      function pointerPos(e) {
+        const r = canvas.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+      }
+      function localToWorld(x, y) {
+        const c = Math.cos(ruler.angle), s = Math.sin(ruler.angle);
+        return { x: ruler.x + x * c - y * s, y: ruler.y + x * s + y * c };
+      }
+      function worldToLocal(p) {
+        const dx = p.x - ruler.x, dy = p.y - ruler.y;
+        const c = Math.cos(ruler.angle), s = Math.sin(ruler.angle);
+        return { x: dx * c + dy * s, y: -dx * s + dy * c };
+      }
+      function localToScreen(x, y) {
+        return worldToScreen(localToWorld(x, y));
+      }
+
+      function setCanvasTransform() {
+        const d = dpr();
+        ctx.setTransform(d * zoom, 0, 0, d * zoom, d * panX, d * panY);
+      }
+
+      function drawGrid() {
+        const dark = body.classList.contains("dark");
+        const w = canvas.width / dpr(), h = canvas.height / dpr();
+        const left = -panX / zoom, top = -panY / zoom;
+        const right = left + w / zoom, bottom = top + h / zoom;
+        const x0 = Math.floor(left / grid) * grid;
+        const y0 = Math.floor(top / grid) * grid;
+
+        ctx.fillStyle = dark ? "#171a20" : "#fff";
+        ctx.fillRect(left, top, right - left, bottom - top);
+
+        ctx.lineWidth = 1 / zoom;
+        for (let x = x0; x <= right; x += grid) {
+          const major = Math.round(x / grid) % 5 === 0;
+          ctx.strokeStyle = dark
+            ? (major ? "#343b47" : "#252b34")
+            : (major ? "#cbd8e8" : "#e7edf4");
+          ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+        }
+        for (let y = y0; y <= bottom; y += grid) {
+          const major = Math.round(y / grid) % 5 === 0;
+          ctx.strokeStyle = dark
+            ? (major ? "#343b47" : "#252b34")
+            : (major ? "#cbd8e8" : "#e7edf4");
+          ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+        }
+      }
+
+      function drawStrokes() {
+        for (const stroke of strokes) {
+          for (const part of stroke.parts) {
+            if (part.length < 1) continue;
+            ctx.beginPath();
+            ctx.moveTo(part[0].x, part[0].y);
+            for (let i = 1; i < part.length; i++) {
+              ctx.lineTo(part[i].x, part[i].y);
+            }
+            ctx.strokeStyle = stroke.color;
+            ctx.lineWidth = stroke.width;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.stroke();
+          }
+        }
+      }
+
+      function drawRuler() {
+  if (!ruler.visible) return;
+
+  ctx.save();
+  ctx.translate(ruler.x, ruler.y);
+  ctx.rotate(ruler.angle);
+
+  const mid = ruler.w / 2;
+  const dark = body.classList.contains("dark");
+
+  // Gleichschenkliges Dreieck: Grundkante unten, Spitze mittig oben.
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(ruler.w, 0);
+  ctx.lineTo(mid, -ruler.h);
+  ctx.closePath();
+  ctx.fillStyle = dark
+    ? "rgba(135,190,220,.19)"
+    : "rgba(115,175,220,.22)";
+  ctx.fill();
+  ctx.strokeStyle = dark
+    ? "rgba(190,220,245,.9)"
+    : "rgba(45,95,135,.9)";
+  ctx.lineWidth = 2 / zoom;
+  ctx.stroke();
+
+  // Mittellinie von der Spitze zur Grundkante.
+  ctx.beginPath();
+  ctx.moveTo(mid, -ruler.h);
+  ctx.lineTo(mid, 0);
+  ctx.stroke();
+
+  // Striche an der Grundkante.
+  // Ein Zentimeter bleibt unabhängig von der Dreiecksgröße zwei Kästchen.
+  for (let x = 0; x <= ruler.w; x += cm / 10) {
+    const isCm = Math.abs(x / cm - Math.round(x / cm)) < 0.001;
+    const isHalfCm = Math.abs(x / (cm / 2) - Math.round(x / (cm / 2))) < 0.001;
+    const length = isCm ? 18 : (isHalfCm ? 12 : 7);
+
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, -length);
+    ctx.stroke();
+
+    if (isCm && x > 0) {
+      ctx.fillStyle = dark ? "#edf5ff" : "#263746";
+      ctx.font = `${13 / zoom}px sans-serif`;
+      ctx.fillText(String(Math.round(x / cm)), x - 4, -22);
+    }
+  }
+
+  // Halbkreis-Winkelskala: 0° rechts, 90° oben, 180° links.
+  const radius = Math.min(ruler.w * 0.34, ruler.h * 0.72);
+
+  ctx.beginPath();
+  ctx.arc(mid, 0, radius, Math.PI, 2 * Math.PI);
+  ctx.stroke();
+
+  for (let deg = 0; deg <= 180; deg += 5) {
+    // 180° links, 90° oben, 0° rechts.
+    const a = Math.PI + (180 - deg) * Math.PI / 180;
+    const major = deg % 10 === 0;
+    const labeled = deg % 10 === 0;
+    const inner = radius - (major ? 14 : 7);
+
+    ctx.beginPath();
+    ctx.moveTo(mid + Math.cos(a) * inner, Math.sin(a) * inner);
+    ctx.lineTo(mid + Math.cos(a) * radius, Math.sin(a) * radius);
+    ctx.stroke();
+
+    if (labeled) {
+      ctx.fillStyle = dark ? "#edf5ff" : "#263746";
+      ctx.font = `${12 / zoom}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        String(deg),
+        mid + Math.cos(a) * (radius - 26),
+        Math.sin(a) * (radius - 26)
+      );
+    }
+  }
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+
+  // Ziehgriffe: Skalieren rechts an der Grundkante, Drehen über der Spitze.
+  const handleRadius = 8 / zoom;
+  const handles = [
+    { x: ruler.w, y: 0 },
+    { x: mid, y: -ruler.h - 30 }
+  ];
+
+  for (const p of handles) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, handleRadius, 0, Math.PI * 2);
+    ctx.fillStyle = dark ? "#d8e8ff" : "#fff";
+    ctx.fill();
+    ctx.strokeStyle = "#367fc1";
+    ctx.lineWidth = 2 / zoom;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+
+      function draw() {
+        const d = dpr();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        setCanvasTransform();
+        drawGrid();
+        drawStrokes();
+        drawRuler();
+      }
+
+      function insideRuler(local) {
+  if (local.x < 0 || local.x > ruler.w || local.y > 0) return false;
+
+  const halfWidth = ruler.w / 2;
+  const heightAtX =
+    ruler.h * (1 - Math.abs(local.x - halfWidth) / halfWidth);
+
+  return -local.y <= heightAtX;
+}
+
+      function distanceToSegment(p, a, b) {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 ? Math.max(0, Math.min(1,
+          ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+        const q = { x: a.x + t * dx, y: a.y + t * dy };
+        return { distance: Math.hypot(p.x - q.x, p.y - q.y), point: q };
+      }
+
+      function nearestRulerEdge(world) {
+  const p = worldToLocal(world);
+  const mid = ruler.w / 2;
+
+  const edges = [
+    [{ x: 0, y: 0 }, { x: ruler.w, y: 0 }],          // Grundkante
+    [{ x: 0, y: 0 }, { x: mid, y: -ruler.h }],       // linke Schräge
+    [{ x: mid, y: -ruler.h }, { x: ruler.w, y: 0 }]  // rechte Schräge
+  ];
+
+  let best = null;
+
+  for (const [a, b] of edges) {
+    const result = distanceToSegment(p, a, b);
+    if (!best || result.distance < best.distance) best = result;
+  }
+
+  if (best && best.distance * zoom < 20) {
+    return localToWorld(best.point.x, best.point.y);
+  }
+  return null;
+}
+
+
+      function snapPoint(world) {
+        return ruler.visible ? (nearestRulerEdge(world) || world) : world;
+      }
+
+      function startPan(p) {
+        drag = { kind: "pan", x: p.x, y: p.y, panX, panY };
+      }
+
+      canvas.addEventListener("pointerdown", e => {
+        canvas.setPointerCapture(e.pointerId);
+        const screen = pointerPos(e);
+        const world = screenToWorld(screen.x, screen.y);
+        pointerDown = true;
+
+        if (e.button === 1 || tool === "pan") {
+          startPan(screen); return;
+        }
+
+        if (ruler.visible) {
+          const scale = localToScreen(ruler.w, 0);
+          const rotate = localToScreen(ruler.w / 2, -ruler.h - 30);
+          const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+          if (dist(screen, scale) < 18) {
+            drag = { kind: "scale" }; return;
+          }
+          if (dist(screen, rotate) < 18) {
+            drag = { kind: "rotate" }; return;
+          }
+          if (insideRuler(worldToLocal(world))) {
+            drag = { kind: "rulerMove", offsetX: world.x - ruler.x, offsetY: world.y - ruler.y };
+            return;
+          }
+        }
+
+        if (tool === "eraser") {
+          eraseAt(world);
+          drag = { kind: "erase" };
+          draw();
+          return;
+        }
+
+        if (tool === "pen") {
+          const first = snapPoint(world);
+          activeStroke = {
+            width: Number(document.querySelector("#thickness").value) / zoom,
+            color: body.classList.contains("dark") ? "#f5f5f5" : "#202124",
+            parts: [[first]]
+          };
+          strokes.push(activeStroke);
+          drag = { kind: "draw" };
+          draw();
+        }
+      });
+
+      canvas.addEventListener("pointermove", e => {
+        if (!pointerDown) return;
+        const screen = pointerPos(e);
+        const world = screenToWorld(screen.x, screen.y);
+
+        if (drag?.kind === "pan") {
+          panX = drag.panX + screen.x - drag.x;
+          panY = drag.panY + screen.y - drag.y;
+        } else if (drag?.kind === "rulerMove") {
+          ruler.x = world.x - drag.offsetX;
+          ruler.y = world.y - drag.offsetY;
+        } else if (drag?.kind === "rotate") {
+          const center = localToWorld(ruler.w / 2, -ruler.h / 3);
+          ruler.angle = Math.atan2(world.y - center.y, world.x - center.x) + Math.PI / 2;
+        } else if (drag?.kind === "scale") {
+          const local = worldToLocal(world);
+          const newW = Math.max(240, local.x);
+          ruler.h = ruler.h * (newW / ruler.w);
+          ruler.w = newW;
+        } else if (drag?.kind === "draw" && activeStroke) {
+          const p = snapPoint(world);
+          const part = activeStroke.parts[activeStroke.parts.length - 1];
+          if (Math.hypot(p.x - part[part.length - 1].x, p.y - part[part.length - 1].y) > 1) {
+            part.push(p);
+          }
+        } else if (drag?.kind === "erase") {
+          eraseAt(world);
+        }
+        draw();
+      });
+
+      function eraseAt(world) {
+        const radius = 13 / zoom;
+        const mode = document.querySelector("#eraseMode").value;
+        if (mode === "whole") {
+          strokes = strokes.filter(stroke => !stroke.parts.some(part =>
+            part.some(p => Math.hypot(p.x - world.x, p.y - world.y) < radius)));
+          return;
+        }
+
+        const updated = [];
+        for (const stroke of strokes) {
+          const newParts = [];
+          for (const part of stroke.parts) {
+            let current = [];
+            for (const p of part) {
+              if (Math.hypot(p.x - world.x, p.y - world.y) < radius) {
+                if (current.length) newParts.push(current);
+                current = [];
+              } else {
+                current.push(p);
+              }
+            }
+            if (current.length) newParts.push(current);
+          }
+          stroke.parts = newParts;
+          if (newParts.length) updated.push(stroke);
+        }
+        strokes = updated;
+      }
+
+      canvas.addEventListener("pointerup", () => {
+        pointerDown = false;
+        activeStroke = null;
+        drag = null;
+      });
+      canvas.addEventListener("pointercancel", () => {
+        pointerDown = false; activeStroke = null; drag = null;
+      });
+
+      canvas.addEventListener("wheel", e => {
+        e.preventDefault();
+        const p = pointerPos(e);
+        const before = screenToWorld(p.x, p.y);
+        zoom = Math.max(.15, Math.min(4, zoom * (e.deltaY < 0 ? 1.1 : .9)));
+        panX = p.x - before.x * zoom;
+        panY = p.y - before.y * zoom;
+        draw();
+      }, { passive: false });
+
+      document.querySelectorAll("[data-tool]").forEach(button => {
+        button.addEventListener("click", () => {
+          tool = button.dataset.tool;
+          document.querySelectorAll("[data-tool]").forEach(b =>
+            b.classList.toggle("active", b === button));
+        });
+      });
+
+      document.querySelector("#rulerButton").addEventListener("click", () => {
+        ruler.visible = !ruler.visible;
+        document.querySelector("#rulerButton").classList.toggle("active", ruler.visible);
+        draw();
+      });
+
+      document.querySelector("#themeButton").addEventListener("click", e => {
+        body.classList.toggle("dark");
+        e.currentTarget.textContent = body.classList.contains("dark")
+          ? "☀ Light Theme" : "☾ Dark Theme";
+        draw();
+      });
+
+      document.querySelector("#clearButton").addEventListener("click", () => {
+        strokes = [];
+        draw();
+      });
+
+      resize();
+    })();
+  </script>
+</body>
+</html>
