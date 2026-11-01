@@ -1,3 +1,28 @@
+let firstSaveTimestamp = null;
+
+function pad(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatSaveTimestamp(date) {
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join("-") + "-" + [
+    pad(date.getHours()),
+    pad(date.getMinutes())
+  ].join("");
+}
+
+function getDefaultDrawingFilename() {
+  if (!firstSaveTimestamp) {
+    firstSaveTimestamp = new Date();
+  }
+
+  return `Zeichnung-${formatSaveTimestamp(firstSaveTimestamp)}.json`;
+}
+
 export function loadDrawingFromFile(file) {
   return file.text().then(raw => {
     const data = JSON.parse(raw);
@@ -62,11 +87,12 @@ export async function saveDrawingToFile(state) {
   };
 
   const json = JSON.stringify(data, null, 2);
+  const suggestedName = getDefaultDrawingFilename();
 
   if (typeof window.showSaveFilePicker === "function") {
     try {
       const handle = await window.showSaveFilePicker({
-        suggestedName: "geometrie-zeichnung.json",
+        suggestedName,
         types: [{
           description: "Geometrie-Zeichnung",
           accept: { "application/json": [".json"] }
@@ -86,7 +112,7 @@ export async function saveDrawingToFile(state) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "geometrie-zeichnung.json";
+  link.download = suggestedName;
   link.style.display = "none";
   document.body.appendChild(link);
   link.click();
