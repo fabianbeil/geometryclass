@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Geometrie-Konstruktionen</title>
-  <link rel="stylesheet" href="style.css">
+<link rel=stylesheet href=style.css>
 </head>
 <body>
   <div id="toolbar">
@@ -126,6 +126,15 @@
       };
 
       const dpr = () => window.devicePixelRatio || 1;
+      let filenameTimestamp = null;
+      let saveFileHandle = null;
+
+      function createTimestamp() {
+        const now = new Date();
+        const pad = value => String(value).padStart(2, "0");
+
+        return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+      }
 
       function resize() {
         const rect = canvas.getBoundingClientRect();
@@ -668,51 +677,65 @@ function drawRuler() {
         draw();
       });
       document.querySelector("#saveButton").addEventListener("click", async () => {
-      const data = {
-        format: "geometrie-canvas",
-        version: 1,
-        strokes,
-        ruler,
-        view: { zoom, panX, panY }
+        filenameTimestamp ??= createTimestamp();
+
+        const filename = `geometrie-zeichnung-${filenameTimestamp}.json`;
+        const data = {
+          format: "geometrie-canvas",
+          version: 1,
+          filenameTimestamp,
+          strokes,
+          ruler,
+          view: { zoom, panX, panY }
         };
-    const json = JSON.stringify(data, null, 2);
+        const json = JSON.stringify(data, null, 2);
 
-    // Dateiauswahldialog in Browsern, die diese API unterstützen.
-    if (typeof window.showSaveFilePicker === "function") {
-    try {
-      const handle = await window.showSaveFilePicker({
-        suggestedName: "geometrie-zeichnung.json",
-        types: [{
-          description: "Geometrie-Zeichnung",
-          accept: { "application/json": [".json"] }
-        }]
+        // Wenn bereits ein Dateihandle gewählt wurde, dieselbe Datei erneut speichern.
+        if (saveFileHandle) {
+          try {
+            const writable = await saveFileHandle.createWritable();
+            await writable.write(json);
+            await writable.close();
+            return;
+          } catch (error) {
+            console.warn("Konnte die zuvor gewählte Datei nicht speichern.", error);
+            saveFileHandle = null;
+          }
+        }
+
+        if (typeof window.showSaveFilePicker === "function") {
+          try {
+            saveFileHandle = await window.showSaveFilePicker({
+              suggestedName: filename,
+              types: [{
+                description: "Geometrie-Zeichnung",
+                accept: { "application/json": [".json"] }
+              }]
+            });
+
+            const writable = await saveFileHandle.createWritable();
+            await writable.write(json);
+            await writable.close();
+            return;
+          } catch (error) {
+            if (error.name === "AbortError") return;
+            console.warn("Dateiauswahldialog nicht verfügbar; starte Download.", error);
+          }
+        }
+
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+
+        link.href = url;
+        link.download = filename;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       });
-
-      const writable = await handle.createWritable();
-      await writable.write(json);
-      await writable.close();
-      return;
-    } catch (error) {
-      if (error.name === "AbortError") return; // Dialog abgebrochen
-      console.warn("Dateiauswahldialog nicht verfügbar; starte Download.", error);
-    }
-  }
-
-  // Firefox und andere Browser ohne showSaveFilePicker:
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-
-  link.href = url;
-  link.download = "geometrie-zeichnung.json";
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-});
-
 
 document.querySelector("#loadButton").addEventListener("click", () => {
   document.querySelector("#loadFile").click();
@@ -723,7 +746,12 @@ document.querySelector("#loadFile").addEventListener("change", async event => {
   if (!file) return;
 
   try {
-    const data = JSON.parse(await file.text());
+      const data = JSON.parse(await file.text());
+
+      filenameTimestamp =
+        data.filenameTimestamp ??
+        file.name.match(/geometrie-zeichnung-(\d{4}-\d{2}-\d{2}-\d{4})\.json$/)?.[1] ??
+        null;
 
     if (
       data.format !== "geometrie-canvas" ||
