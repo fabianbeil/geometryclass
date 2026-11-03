@@ -71,10 +71,16 @@
     <i data-lucide="triangle"></i>
   </button>
 
-  <button id="compassButton" class="icon-btn" disabled
-          aria-label="Zirkel, später" title="Zirkel (später)">
-    <i data-lucide="circle"></i>
+  <button id="compassButton" class="icon-btn"
+    aria-label="Zirkel" title="Zirkel">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+         fill="none" stroke="currentColor" stroke-width="1.7"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v3m-2 0h4l-2 2-7 12m7-12 7 12M5 20l2-1m12 1-2-1M8.5 13h7" />
+      <circle cx="12" cy="6" r="1.5" />
+    </svg>
   </button>
+
 
   <button id="themeButton" class="icon-btn"
           aria-label="Theme wechseln" title="Theme wechseln">
@@ -92,6 +98,19 @@
   </button>
 
   <input id="loadFile" type="file" accept=".json,application/json" hidden>
+
+  <button id="undoButton" class="icon-btn" aria-label="Rückgängig" title="Rückgängig (Strg+Z)" disabled>
+    <i data-lucide="undo-2"></i>
+  </button>
+  <button id="redoButton" class="icon-btn" aria-label="Wiederherstellen" title="Wiederherstellen (Strg+Y)" disabled>
+    <i data-lucide="redo-2"></i>
+  </button>
+  <button id="exportSvgButton" class="icon-btn" aria-label="Als SVG exportieren" title="Als SVG exportieren">
+    <i data-lucide="file-image"></i>
+  </button>
+  <button id="exportSvgWithToolsButton" class="icon-btn" aria-label="Als SVG mit Geodreieck und Zirkel exportieren" title="SVG mit Geodreieck und Zirkel exportieren">
+    <i data-lucide="pencil-ruler"></i>
+  </button>
 
   <button id="clearButton" class="icon-btn"
           aria-label="Alles löschen" title="Alles löschen">
@@ -124,10 +143,86 @@
         w: 600, h: 300,
         angle: 0
       };
+      let compass = {
+        visible: false,
+        x: 420, y: 320,       // Mittelpunkt der Einstichspitze
+        angle: 0,              // Richtung von der Einstichspitze zur Mine
+        radius: 2 * 8 * grid * Math.sin(10 * Math.PI / 180),
+        drawing: false,
+        draggingTip: false
+      };
+
 
       const dpr = () => window.devicePixelRatio || 1;
       let filenameTimestamp = null;
       let saveFileHandle = null;
+      const undoStack = [];
+      const redoStack = [];
+      const historyLimit = 100;
+
+      function snapshot() {
+        return JSON.parse(JSON.stringify({
+          strokes, ruler, compass: {
+            visible: compass.visible,
+            x: compass.x, y: compass.y,
+            angle: compass.angle, radius: compass.radius
+          },
+          view: { zoom, panX, panY }
+        }));
+      }
+
+      function updateHistoryButtons() {
+        document.querySelector("#undoButton").disabled = undoStack.length === 0;
+        document.querySelector("#redoButton").disabled = redoStack.length === 0;
+      }
+
+      function recordUndo() {
+        undoStack.push(snapshot());
+        if (undoStack.length > historyLimit) undoStack.shift();
+        redoStack.length = 0;
+        updateHistoryButtons();
+      }
+
+      function restoreSnapshot(state) {
+        strokes = state.strokes;
+        ruler = state.ruler;
+        compass = { ...compass, ...state.compass, drawing: false, draggingTip: false };
+        zoom = state.view.zoom;
+        panX = state.view.panX;
+        panY = state.view.panY;
+        activeStroke = null;
+        drag = null;
+        pointerDown = false;
+        draw();
+        updateHistoryButtons();
+      }
+
+      function undo() {
+        if (!undoStack.length) return;
+        redoStack.push(snapshot());
+        restoreSnapshot(undoStack.pop());
+      }
+
+      function redo() {
+        if (!redoStack.length) return;
+        undoStack.push(snapshot());
+        restoreSnapshot(redoStack.pop());
+      }
+
+      document.querySelector("#undoButton").addEventListener("click", undo);
+      document.querySelector("#redoButton").addEventListener("click", redo);
+      window.addEventListener("keydown", event => {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+        const key = event.key.toLowerCase();
+        if (key === "z") {
+          event.preventDefault();
+          if (event.shiftKey) redo();
+          else undo();
+        } else if (key === "y") {
+          event.preventDefault();
+          redo();
+        }
+      });
 
       function createTimestamp() {
         const now = new Date();
@@ -438,6 +533,220 @@ function drawRuler() {
   ctx.restore();
 }
 
+function compassPoint(localX, localY) {
+  const c = Math.cos(compass.angle);
+  const s = Math.sin(compass.angle);
+  return {
+    x: compass.x + localX * c - localY * s,
+    y: compass.y + localX * s + localY * c
+  };
+}
+
+function compassTip() {
+  return compassPoint(compass.radius, 0);
+}
+
+function compassArmLength() {
+  const maxOpening = 160 * Math.PI / 180;
+  return Math.max(8 * grid, compass.radius / (2 * Math.sin(maxOpening / 2)));
+}
+
+function compassGrip() {
+  const x = compass.radius / 2;
+  const y = -Math.sqrt(Math.max(0, compassArmLength() ** 2 - x ** 2));
+  return compassPoint(x, y - 30 / zoom - 23);
+}
+
+function compassRotateControl() {
+  const x = compass.radius / 4;
+  const y = (-Math.sqrt(Math.max(0, compassArmLength() ** 2 - (compass.radius / 2) ** 2)) - 30 / zoom) / 2;
+  return compassPoint(x, y);
+}
+
+function drawCompass() {
+  if (!compass.visible) return;
+
+  const dark = body.classList.contains("dark");
+  const headX = compass.radius / 2;
+  const headY = -Math.sqrt(Math.max(0, compassArmLength() ** 2 - headX ** 2));
+
+  ctx.save();
+  ctx.translate(compass.x, compass.y);
+  ctx.rotate(compass.angle);
+
+  // Zwei orangefarbene Schenkel, inspiriert von der Vorlage.
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#ed8b19";
+  ctx.lineWidth = 12 / zoom;
+
+  ctx.beginPath();
+  ctx.moveTo(headX, headY - 30 / zoom);
+  ctx.lineTo(0, -30 / zoom);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(headX, headY - 30 / zoom);
+  ctx.lineTo(compass.radius, -30 / zoom);
+  ctx.stroke();
+
+  // Dunkles Gelenk und Griff.
+  ctx.fillStyle = "#263746";
+  ctx.beginPath();
+  ctx.roundRect(headX - 15, headY - 30 / zoom - 13, 30, 27, 5 / zoom);
+  ctx.fill();
+  ctx.fillRect(headX - 6, headY - 30 / zoom - 32, 12, 19);
+
+  // Spitzen sind doppelt so lang; ihre Endpunkte liegen exakt auf Pin und Mine.
+  ctx.fillStyle = dark ? "#eef1f5" : "#263746";
+  ctx.beginPath();
+  ctx.moveTo(-5 / zoom, -30 / zoom);
+  ctx.lineTo(5 / zoom, -30 / zoom);
+  ctx.lineTo(0, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // Zeichenbein und Bleistiftmine.
+  ctx.fillStyle = "#374957";
+  ctx.beginPath();
+  ctx.moveTo(compass.radius - 5 / zoom, -30 / zoom);
+  ctx.lineTo(compass.radius + 5 / zoom, -30 / zoom);
+  ctx.lineTo(compass.radius, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // Ziehgriff und verschiebbare Spitzen als Bildschirm-Handles.
+  for (const [x, y, color, r] of [
+    [headX, headY - 30 / zoom - 23, "#263746", 8],
+    [0, 0, "#367fc1", 7],
+    [compass.radius, 0, "#367fc1", 7]
+  ]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r / zoom, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = dark ? "#eef1f5" : "#fff";
+    ctx.lineWidth = 2 / zoom;
+    ctx.stroke();
+  }
+
+  // Drehknopf am Einsticharm. Ziehen dreht den Zirkel, ohne zu zeichnen.
+  const rotateControl = compassRotateControl();
+  const rotateLocal = {
+    x: (rotateControl.x - compass.x) * Math.cos(compass.angle) + (rotateControl.y - compass.y) * Math.sin(compass.angle),
+    y: -(rotateControl.x - compass.x) * Math.sin(compass.angle) + (rotateControl.y - compass.y) * Math.cos(compass.angle)
+  };
+  const rotateX = rotateLocal.x;
+  const rotateY = rotateLocal.y;
+  ctx.beginPath();
+  ctx.arc(rotateX, rotateY, 9 / zoom, 0, Math.PI * 2);
+  ctx.fillStyle = "#8e24aa";
+  ctx.fill();
+  ctx.strokeStyle = dark ? "#eef1f5" : "#fff";
+  ctx.lineWidth = 2 / zoom;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(rotateX, rotateY, 4 / zoom, -Math.PI * 0.8, Math.PI * 0.65);
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 1.5 / zoom;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(rotateX + 3 / zoom, rotateY - 4 / zoom);
+  ctx.lineTo(rotateX + 5 / zoom, rotateY - 1 / zoom);
+  ctx.lineTo(rotateX + 1 / zoom, rotateY - 1 / zoom);
+  ctx.fillStyle = "#fff";
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawCompassMagnifier() {
+  if (!compass.visible || !compass.draggingTip ||
+      !["compassPin", "compassPencil"].includes(drag?.kind)) return;
+
+  const d = dpr();
+  const focus = drag.kind === "compassPin" ? { x: compass.x, y: compass.y } : compassTip();
+  const focusScreen = worldToScreen(focus);
+  const lensX = focusScreen.x + (focus.x < compass.x ? 68 : -68);
+  const lensY = focusScreen.y - 68;
+  const lensRadius = 54;
+  const magnification = 2.5;
+
+  ctx.save();
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+
+  // Kreisförmige Lupe nahe der Einstichspitze.
+  ctx.beginPath();
+  ctx.arc(lensX, lensY, lensRadius, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = body.classList.contains("dark") ? "#171a20" : "#fff";
+  ctx.fillRect(
+    lensX - lensRadius, lensY - lensRadius,
+    lensRadius * 2, lensRadius * 2
+  );
+
+  // Weltkoordinaten so transformieren, dass die gezogene Spitze in der Lupenmitte liegt.
+  ctx.setTransform(
+    d * zoom * magnification, 0, 0, d * zoom * magnification,
+    d * (lensX - focus.x * zoom * magnification),
+    d * (lensY - focus.y * zoom * magnification)
+  );
+
+  const range = lensRadius / (zoom * magnification);
+  const x0 = Math.floor((focus.x - range) / grid) * grid;
+  const y0 = Math.floor((focus.y - range) / grid) * grid;
+  ctx.strokeStyle = body.classList.contains("dark") ? "#343b45" : "#dce3eb";
+  ctx.lineWidth = 0.7 / (zoom * magnification);
+
+  for (let x = x0; x <= focus.x + range; x += grid) {
+    ctx.beginPath();
+    ctx.moveTo(x, focus.y - range);
+    ctx.lineTo(x, focus.y + range);
+    ctx.stroke();
+  }
+  for (let y = y0; y <= focus.y + range; y += grid) {
+    ctx.beginPath();
+    ctx.moveTo(focus.x - range, y);
+    ctx.lineTo(focus.x + range, y);
+    ctx.stroke();
+  }
+
+  drawStrokes();
+  ctx.restore();
+
+  // Rahmen und Fadenkreuz der Lupe.
+  ctx.setTransform(d, 0, 0, d, 0, 0);
+  ctx.beginPath();
+  ctx.arc(lensX, lensY, lensRadius, 0, Math.PI * 2);
+  ctx.strokeStyle = "#367fc1";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(lensX - 7, lensY);
+  ctx.lineTo(lensX + 7, lensY);
+  ctx.moveTo(lensX, lensY - 7);
+  ctx.lineTo(lensX, lensY + 7);
+  ctx.stroke();
+}
+
+function startCompassDrawing(pointerWorld) {
+  if (compass.drawing) return;
+
+  recordUndo();
+  compass.drawing = true;
+  const stroke = {
+    width: Number(document.querySelector("#thickness").value) / zoom,
+    color: document.querySelector("#penColor").value,
+    parts: [[compassTip()]]
+  };
+  strokes.push(stroke);
+
+  drag = {
+    kind: "compassDraw",
+    lastPointerAngle: Math.atan2(pointerWorld.y - compass.y, pointerWorld.x - compass.x)
+  };
+}
+
 
       function draw() {
         const d = dpr();
@@ -447,6 +756,9 @@ function drawRuler() {
         drawGrid();
         drawStrokes();
         drawRuler();
+        drawRulerRayPreview();
+        drawCompass();
+        drawCompassMagnifier();
       }
 
       function insideRuler(local) {
@@ -468,7 +780,7 @@ function drawRuler() {
         return { distance: Math.hypot(p.x - q.x, p.y - q.y), point: q };
       }
 
-      function nearestRulerEdge(world) {
+      function nearestRulerEdge(world, edgeIndex = null) {
   const p = worldToLocal(world);
   const mid = ruler.w / 2;
 
@@ -480,23 +792,81 @@ function drawRuler() {
 
   let best = null;
 
-  for (const [a, b] of edges) {
+  for (let index = 0; index < edges.length; index++) {
+    if (edgeIndex !== null && index !== edgeIndex) continue;
+    const [a, b] = edges[index];
     const result = distanceToSegment(p, a, b);
-    if (!best || result.distance < best.distance) best = result;
+    if (!best || result.distance < best.distance) best = { ...result, index };
   }
 
-  if (best && best.distance * zoom < 20) {
-    return localToWorld(best.point.x, best.point.y);
-  }
-  return null;
+  return best ? { ...best, point: localToWorld(best.point.x, best.point.y) } : null;
 }
 
 
-      function snapPoint(world) {
-        return ruler.visible ? (nearestRulerEdge(world) || world) : world;
+      function snapPoint(world, edgeIndex = null) {
+        if (!ruler.visible) return world;
+        const nearest = nearestRulerEdge(world, edgeIndex);
+        if (!nearest) return world;
+        return edgeIndex !== null || nearest.distance * zoom < 20
+          ? nearest.point
+          : world;
+      }
+
+      function rulerProtractorHit(world) {
+        const local = worldToLocal(world);
+        const radius = ruler.h * 0.65;
+        const distance = Math.hypot(local.x - ruler.w / 2, local.y);
+        return local.y <= 0 && Math.abs(distance - radius) * zoom < 18;
+      }
+
+      function rulerRayFromPointer(world) {
+        const local = worldToLocal(world);
+        const mid = ruler.w / 2;
+        const origin = { x: mid, y: 0 };
+        const angle = Math.max(-Math.PI / 2, Math.min(Math.PI / 2,
+          Math.atan2(local.x - mid, -local.y)));
+        const side = angle < 0 ? "left" : "right";
+        const direction = {
+          x: (side === "left" ? -1 : 1) * Math.sin(Math.abs(angle)),
+          y: -Math.cos(angle)
+        };
+        const apex = { x: mid, y: -ruler.h };
+        const edgeEnd = { x: side === "left" ? 0 : ruler.w, y: 0 };
+        const edge = { x: edgeEnd.x - apex.x, y: edgeEnd.y - apex.y };
+        const cross = (a, b) => a.x * b.y - a.y * b.x;
+        const denominator = cross(direction, edge);
+        const distance = Math.abs(denominator) < 1e-9
+          ? ruler.h
+          : cross({ x: apex.x - origin.x, y: apex.y - origin.y }, edge) / denominator;
+        const overhang = cm * 3 / 10; // 3 mm
+        const end = {
+          x: origin.x + direction.x * (distance + overhang),
+          y: origin.y + direction.y * (distance + overhang)
+        };
+
+        return {
+          start: localToWorld(origin.x, origin.y),
+          end: localToWorld(end.x, end.y)
+        };
+      }
+
+      function drawRulerRayPreview() {
+        if (drag?.kind !== "rulerRay" || !drag.line) return;
+        const color = document.querySelector("#penColor").value;
+        const standard = color === "standard" || color === "#202124" || color === "#f5f5f5";
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(drag.line.start.x, drag.line.start.y);
+        ctx.lineTo(drag.line.end.x, drag.line.end.y);
+        ctx.strokeStyle = standard ? (body.classList.contains("dark") ? "#fff" : "#000") : color;
+        ctx.lineWidth = Number(document.querySelector("#thickness").value) / zoom;
+        ctx.lineCap = "round";
+        ctx.stroke();
+        ctx.restore();
       }
 
       function startPan(p) {
+        recordUndo();
         drag = { kind: "pan", x: p.x, y: p.y, panX, panY };
       }
 
@@ -505,6 +875,56 @@ function drawRuler() {
         const screen = pointerPos(e);
         const world = screenToWorld(screen.x, screen.y);
         pointerDown = true;
+        if (compass.visible && !compass.drawing) {
+        const tipScreen = worldToScreen(compassTip());
+        const gripScreen = worldToScreen(compassGrip());
+        const rotateScreen = worldToScreen(compassRotateControl());
+        const pinScreen = worldToScreen({ x: compass.x, y: compass.y });
+        const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+        if (dist(screen, rotateScreen) < 18) {
+          recordUndo();
+          drag = {
+            kind: "compassRotate",
+            lastPointerAngle: Math.atan2(world.y - compass.y, world.x - compass.x),
+            moved: false
+          };
+          return;
+        }
+
+        if (dist(screen, gripScreen) < 18) {
+          startCompassDrawing(world);
+          draw();
+          return;
+        }
+
+        if (dist(screen, pinScreen) < 18) {
+          recordUndo();
+          compass.draggingTip = true;
+          drag = {
+            kind: "compassPin",
+            offsetX: world.x - compass.x,
+            offsetY: world.y - compass.y
+          };
+          draw();
+          return;
+        }
+
+        if (dist(screen, tipScreen) < 18) {
+          recordUndo();
+          compass.draggingTip = true;
+          drag = { kind: "compassPencil" };
+          draw();
+          return;
+        }
+      }
+
+        if (ruler.visible && rulerProtractorHit(world)) {
+          recordUndo();
+          drag = { kind: "rulerRay", line: rulerRayFromPointer(world) };
+          draw();
+          return;
+        }
 
         if (e.button === 1 || tool === "pan") {
           startPan(screen); return;
@@ -515,18 +935,24 @@ function drawRuler() {
           const rotate = localToScreen(ruler.w / 2, -ruler.h - 30);
           const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
           if (dist(screen, scale) < 18) {
+            recordUndo();
             drag = { kind: "scale" }; return;
           }
           if (dist(screen, rotate) < 18) {
+            recordUndo();
             drag = { kind: "rotate" }; return;
           }
-          if (insideRuler(worldToLocal(world))) {
+          const rulerEdgeHit = tool === "pen" ? nearestRulerEdge(world) : null;
+          const drawingOnRulerEdge = rulerEdgeHit && rulerEdgeHit.distance * zoom < 20;
+          if (!drawingOnRulerEdge && insideRuler(worldToLocal(world))) {
+            recordUndo();
             drag = { kind: "rulerMove", offsetX: world.x - ruler.x, offsetY: world.y - ruler.y };
             return;
           }
         }
 
         if (tool === "eraser") {
+          recordUndo();
           eraseAt(world);
           drag = { kind: "erase" };
           draw();
@@ -534,14 +960,19 @@ function drawRuler() {
         }
 
         if (tool === "pen") {
-          const first = snapPoint(world);
+          recordUndo();
+          const nearestEdge = ruler.visible ? nearestRulerEdge(world) : null;
+          const rulerEdge = nearestEdge && nearestEdge.distance * zoom < 20
+            ? nearestEdge.index
+            : null;
+          const first = rulerEdge === null ? world : nearestEdge.point;
           activeStroke = {
             width: Number(document.querySelector("#thickness").value) / zoom,
             color: document.querySelector("#penColor").value,
             parts: [[first]]
           };
           strokes.push(activeStroke);
-          drag = { kind: "draw" };
+          drag = { kind: "draw", rulerEdge };
           draw();
         }
       });
@@ -550,8 +981,43 @@ function drawRuler() {
         if (!pointerDown) return;
         const screen = pointerPos(e);
         const world = screenToWorld(screen.x, screen.y);
-
-        if (drag?.kind === "pan") {
+        if (drag?.kind === "rulerRay") {
+          drag.line = rulerRayFromPointer(world);
+        } else if (drag?.kind === "compassPin") {
+          compass.x = world.x - drag.offsetX;
+          compass.y = world.y - drag.offsetY;
+        } else if (drag?.kind === "compassPencil") {
+          const dx = world.x - compass.x;
+          const dy = world.y - compass.y;
+          compass.radius = Math.max(35, Math.hypot(dx, dy));
+          compass.angle = Math.atan2(dy, dx);
+        } else if (drag?.kind === "compassDraw") {
+          const pointerAngle = Math.atan2(world.y - compass.y, world.x - compass.x);
+          let delta = pointerAngle - drag.lastPointerAngle;
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+          const steps = Math.max(1, Math.ceil(Math.abs(delta) * compass.radius / 4));
+          const part = strokes[strokes.length - 1].parts[0];
+          const startAngle = compass.angle;
+          const endAngle = startAngle + delta;
+          for (let i = 1; i <= steps; i++) {
+            const nextAngle = startAngle + delta * i / steps;
+            part.push({
+              x: compass.x + compass.radius * Math.cos(nextAngle),
+              y: compass.y + compass.radius * Math.sin(nextAngle)
+            });
+          }
+          compass.angle = endAngle;
+          drag.lastPointerAngle = pointerAngle;
+        } else if (drag?.kind === "compassRotate") {
+          const pointerAngle = Math.atan2(world.y - compass.y, world.x - compass.x);
+          let delta = pointerAngle - drag.lastPointerAngle;
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+          if (Math.abs(delta) > 0.001) drag.moved = true;
+          compass.angle += delta;
+          drag.lastPointerAngle = pointerAngle;
+        } else if (drag?.kind === "pan") {
           panX = drag.panX + screen.x - drag.x;
           panY = drag.panY + screen.y - drag.y;
         } else if (drag?.kind === "rulerMove") {
@@ -579,7 +1045,7 @@ function drawRuler() {
           ruler.h = ruler.h * (newW / ruler.w);
           ruler.w = newW;
         } else if (drag?.kind === "draw" && activeStroke) {
-          const p = snapPoint(world);
+          const p = snapPoint(world, drag.rulerEdge);
           const part = activeStroke.parts[activeStroke.parts.length - 1];
           if (Math.hypot(p.x - part[part.length - 1].x, p.y - part[part.length - 1].y) > 1) {
             part.push(p);
@@ -623,10 +1089,32 @@ function drawRuler() {
       canvas.addEventListener("pointerup", () => {
         pointerDown = false;
         activeStroke = null;
+        if (drag?.kind === "compassDraw") compass.drawing = false;
+        if (drag?.kind === "compassRotate" && !drag.moved) {
+          compass.angle += Math.PI / 12;
+        }
+        if (drag?.kind === "rulerRay" && drag.line) {
+          strokes.push({
+            width: Number(document.querySelector("#thickness").value) / zoom,
+            color: document.querySelector("#penColor").value,
+            parts: [[drag.line.start, drag.line.end]]
+          });
+        }
         drag = null;
+        compass.draggingTip = false;
+        draw();
       });
       canvas.addEventListener("pointercancel", () => {
+        if (drag?.kind === "compassDraw") compass.drawing = false;
         pointerDown = false; activeStroke = null; drag = null;
+        compass.draggingTip = false;
+        draw();
+      });
+      canvas.addEventListener("lostpointercapture", () => {
+        if (drag?.kind === "compassDraw") compass.drawing = false;
+        pointerDown = false; activeStroke = null; drag = null;
+        compass.draggingTip = false;
+        draw();
       });
 
       canvas.addEventListener("wheel", e => {
@@ -659,8 +1147,16 @@ function drawRuler() {
 
 
       document.querySelector("#rulerButton").addEventListener("click", () => {
+      console.log("Ruler-Button geklickt");
         ruler.visible = !ruler.visible;
         document.querySelector("#rulerButton").classList.toggle("active", ruler.visible);
+        draw();
+      });
+
+      document.querySelector("#compassButton").addEventListener("click", () => {
+        compass.visible = !compass.visible;
+        document.querySelector("#compassButton")
+          .classList.toggle("active", compass.visible);
         draw();
       });
 
@@ -673,9 +1169,169 @@ function drawRuler() {
       });
 
       document.querySelector("#clearButton").addEventListener("click", () => {
+        if (!strokes.length) return;
+        recordUndo();
         strokes = [];
         draw();
       });
+
+      function exportSvg(includeTools = false) {
+        const rect = canvas.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        const left = -panX / zoom;
+        const top = -panY / zoom;
+        const right = left + width / zoom;
+        const bottom = top + height / zoom;
+        const dark = body.classList.contains("dark");
+        const background = dark ? "#171a20" : "#ffffff";
+        const gridColor = dark ? "#343b45" : "#dce3eb";
+        const xml = value => String(value).replace(/[&<>"]/g, character => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;"
+        })[character]);
+        const gridLines = [];
+
+        for (let x = Math.floor(left / grid) * grid; x <= right; x += grid) {
+          gridLines.push(`<path d="M ${x} ${top} V ${bottom}"/>`);
+        }
+        for (let y = Math.floor(top / grid) * grid; y <= bottom; y += grid) {
+          gridLines.push(`<path d="M ${left} ${y} H ${right}"/>`);
+        }
+
+        const paths = [];
+        for (const stroke of strokes) {
+          const color = stroke.color === "standard" || stroke.color === "#202124" || stroke.color === "#f5f5f5"
+            ? (dark ? "#ffffff" : "#000000")
+            : stroke.color;
+          for (const part of stroke.parts) {
+            if (!part.length) continue;
+            const d = part.map((point, index) =>
+              `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`
+            ).join(" ");
+            paths.push(`<path d="${d}" fill="none" stroke="${xml(color)}" stroke-width="${stroke.width}" stroke-linecap="round" stroke-linejoin="round"/>`);
+          }
+        }
+
+        let toolMarkup = "";
+        if (includeTools && ruler.visible) {
+          const mid = ruler.w / 2;
+          const protractorRadius = ruler.h * 0.65;
+          const scaleColor = dark ? "#edf5ff" : "#263746";
+          const rulerStroke = dark ? "rgba(190,220,245,.9)" : "rgba(45,95,135,.9)";
+          const centimeterTicks = [];
+          const degreeTicks = [];
+          const degreeLabels = [];
+          const slantedTicks = [];
+          const slantedLabels = [];
+          const tickStep = cm / 10;
+
+          for (let i = -Math.floor(mid / tickStep); i <= Math.floor(mid / tickStep); i++) {
+            const x = mid + i * tickStep;
+            const absolute = Math.abs(i);
+            const length = absolute % 10 === 0 ? 18 : absolute % 5 === 0 ? 12 : 7;
+            centimeterTicks.push(`<path d="M ${x} 0 V ${-length}"/>`);
+            if (absolute % 10 === 0) {
+              centimeterTicks.push(`<text x="${x}" y="-22" fill="${scaleColor}" stroke="none" font-size="${13 / zoom}" text-anchor="middle">${absolute / 10}</text>`);
+            }
+          }
+
+          for (let deg = -90; deg <= 90; deg++) {
+            const angle = -Math.PI / 2 + deg * Math.PI / 180;
+            const absolute = Math.abs(deg);
+            const major = absolute % 10 === 0;
+            const length = major ? 14 : absolute % 5 === 0 ? 10 : 5;
+            const inner = protractorRadius - length;
+            const x1 = mid + Math.cos(angle) * inner;
+            const y1 = Math.sin(angle) * inner;
+            const x2 = mid + Math.cos(angle) * protractorRadius;
+            const y2 = Math.sin(angle) * protractorRadius;
+            degreeTicks.push(`<path d="M ${x1} ${y1} L ${x2} ${y2}"/>`);
+            if (major && deg !== 0) {
+              const labelRadius = protractorRadius - 26;
+              degreeLabels.push(`<text x="${mid + Math.cos(angle) * labelRadius}" y="${Math.sin(angle) * labelRadius}" fill="${scaleColor}" stroke="none" font-size="${12 / zoom}" text-anchor="middle" dominant-baseline="middle">${absolute}</text>`);
+            }
+          }
+
+          const apex = { x: mid, y: -ruler.h };
+          const cross = (a, b) => a.x * b.y - a.y * b.x;
+          for (const side of ["left", "right"]) {
+            const edgeEnd = { x: side === "left" ? 0 : ruler.w, y: 0 };
+            const edge = { x: edgeEnd.x - apex.x, y: edgeEnd.y - apex.y };
+            const edgeLength = Math.hypot(edge.x, edge.y);
+            const normal = side === "left"
+              ? { x: -edge.y / edgeLength, y: edge.x / edgeLength }
+              : { x: edge.y / edgeLength, y: -edge.x / edgeLength };
+            for (let deg = 0; deg <= 90; deg++) {
+              const a = deg * Math.PI / 180;
+              const direction = side === "left"
+                ? { x: -Math.sin(a), y: -Math.cos(a) }
+                : { x: Math.sin(a), y: -Math.cos(a) };
+              const denominator = cross(direction, edge);
+              if (Math.abs(denominator) < 1e-9) continue;
+              const t = cross({ x: apex.x - mid, y: apex.y }, direction) / denominator;
+              if (t < -1e-6 || t > 1 + 1e-6) continue;
+              const point = { x: apex.x + edge.x * t, y: apex.y + edge.y * t };
+              const length = deg % 10 === 0 ? 14 : deg % 5 === 0 ? 10 : 5;
+              slantedTicks.push(`<path d="M ${point.x - normal.x * length / 2} ${point.y - normal.y * length / 2} L ${point.x + normal.x * length / 2} ${point.y + normal.y * length / 2}"/>`);
+              if (deg > 0 && deg % 10 === 0) {
+                slantedLabels.push(`<text x="${point.x + normal.x * 17}" y="${point.y + normal.y * 17}" fill="${scaleColor}" stroke="none" font-size="${11 / zoom}" text-anchor="${side === "left" ? "end" : "start"}" dominant-baseline="middle">${deg}</text>`);
+              }
+            }
+          }
+
+          toolMarkup += `<g transform="translate(${ruler.x} ${ruler.y}) rotate(${ruler.angle * 180 / Math.PI})">` +
+            `<path d="M 0 0 L ${ruler.w} 0 L ${mid} ${-ruler.h} Z" fill="${dark ? "rgba(135,190,220,.19)" : "rgba(115,175,220,.22)"}" stroke="${rulerStroke}" stroke-width="${2 / zoom}"/>` +
+            `<path d="M ${mid} 0 L ${mid} ${-ruler.h}" fill="none" stroke="${rulerStroke}" stroke-width="${2 / zoom}"/>` +
+            `<path d="M ${mid - protractorRadius} 0 A ${protractorRadius} ${protractorRadius} 0 0 1 ${mid + protractorRadius} 0" fill="none" stroke="${rulerStroke}" stroke-width="${2 / zoom}"/>` +
+            `<g fill="none" stroke="${rulerStroke}" stroke-width="${1.5 / zoom}">${centimeterTicks.join("")}${degreeTicks.join("")}${slantedTicks.join("")}</g>` +
+            `<g font-family="sans-serif">${degreeLabels.join("")}${slantedLabels.join("")}</g>` +
+            `<circle cx="${mid}" cy="0" r="${4 / zoom}" fill="#e53935"/><text x="${mid}" y="${-8 / zoom}" fill="${scaleColor}" font-family="sans-serif" font-size="${13 / zoom}" text-anchor="middle">0</text>` +
+            `</g>`;
+        }
+
+        if (includeTools && compass.visible) {
+          const halfGap = compass.radius / 2;
+          const armLength = compassArmLength();
+          const headX = halfGap;
+          const headY = -Math.sqrt(Math.max(0, armLength ** 2 - halfGap ** 2));
+          const rotate = compassRotateControl();
+          const rotateX = (rotate.x - compass.x) * Math.cos(compass.angle) + (rotate.y - compass.y) * Math.sin(compass.angle);
+          const rotateY = -(rotate.x - compass.x) * Math.sin(compass.angle) + (rotate.y - compass.y) * Math.cos(compass.angle);
+          toolMarkup += `<g transform="translate(${compass.x} ${compass.y}) rotate(${compass.angle * 180 / Math.PI})" stroke-linecap="round" stroke-linejoin="round">` +
+            `<path d="M ${headX} ${headY - 30 / zoom} L 0 ${-30 / zoom} M ${headX} ${headY - 30 / zoom} L ${compass.radius} ${-30 / zoom}" fill="none" stroke="#ed8b19" stroke-width="${12 / zoom}"/>` +
+            `<rect x="${headX - 15}" y="${headY - 30 / zoom - 13}" width="30" height="27" rx="${5 / zoom}" fill="#263746"/>` +
+            `<rect x="${headX - 6}" y="${headY - 30 / zoom - 32}" width="12" height="19" fill="#263746"/>` +
+            `<path d="M ${-5 / zoom} ${-30 / zoom} L ${5 / zoom} ${-30 / zoom} L 0 0 Z" fill="${dark ? "#eef1f5" : "#263746"}"/>` +
+            `<path d="M ${compass.radius - 5 / zoom} ${-30 / zoom} L ${compass.radius + 5 / zoom} ${-30 / zoom} L ${compass.radius} 0 Z" fill="#374957"/>` +
+            `<circle cx="${headX}" cy="${headY - 30 / zoom - 23}" r="${8 / zoom}" fill="#263746"/>` +
+            `<circle cx="0" cy="0" r="${7 / zoom}" fill="#367fc1"/><circle cx="${compass.radius}" cy="0" r="${7 / zoom}" fill="#367fc1"/>` +
+            `<circle cx="${rotateX}" cy="${rotateY}" r="${9 / zoom}" fill="#8e24aa"/>` +
+            `</g>`;
+        }
+
+        const svg = `<?xml version="1.0" encoding="UTF-8"?>\n` +
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+          `<rect width="100%" height="100%" fill="${background}"/>` +
+          `<g transform="translate(${panX} ${panY}) scale(${zoom})">` +
+          `<g fill="none" stroke="${gridColor}" stroke-width="${1.5 / zoom}">${gridLines.join("")}</g>` +
+          paths.join("") +
+          toolMarkup +
+          `</g></svg>`;
+        const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `geometrie-zeichnung-${createTimestamp()}.svg`;
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+
+      document.querySelector("#exportSvgButton").addEventListener("click", () => exportSvg(false));
+      document.querySelector("#exportSvgWithToolsButton").addEventListener("click", () => exportSvg(true));
+
       document.querySelector("#saveButton").addEventListener("click", async () => {
         filenameTimestamp ??= createTimestamp();
 
@@ -686,7 +1342,14 @@ function drawRuler() {
           filenameTimestamp,
           strokes,
           ruler,
-          view: { zoom, panX, panY }
+          view: { zoom, panX, panY },
+          compass: {
+          visible: compass.visible,
+          x: compass.x,
+          y: compass.y,
+          angle: compass.angle,
+          radius: compass.radius
+        }
         };
         const json = JSON.stringify(data, null, 2);
 
@@ -797,8 +1460,33 @@ document.querySelector("#loadFile").addEventListener("change", async event => {
       throw new Error("Die Zeichnungsdatei enthält ungültige Daten.");
     }
 
+    if (data.compass) {
+  const c = data.compass;
+  const validCompass =
+    typeof c.visible === "boolean" &&
+    [c.x, c.y, c.angle, c.radius].every(
+      value => typeof value === "number" && Number.isFinite(value)
+    ) &&
+    c.radius > 0;
+
+  if (!validCompass) {
+    throw new Error("Die Zirkel-Einstellungen sind ungültig.");
+  }
+
+}
+
+    recordUndo();
     strokes = data.strokes;
     ruler = data.ruler;
+    if (data.compass) {
+      compass = {
+        ...compass,
+        ...data.compass,
+        drawing: false,
+        draggingTip: false
+      };
+    }
+
     zoom = Math.max(0.15, Math.min(4, data.view.zoom));
     panX = data.view.panX;
     panY = data.view.panY;
