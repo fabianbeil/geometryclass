@@ -14,6 +14,13 @@ Lade `index.html` und `style.css` gemeinsam herunter und öffne `index.html` in 
 - Mit dem Mausrad zoomst du an der Zeigerposition. Zum Verschieben wählst du das **Hand-Werkzeug** oder hältst die mittlere Maustaste gedrückt.
 - **Rückgängig** und **Wiederherstellen** stehen über die Toolbar sowie mit `Strg+Z`, `Strg+Y` und `Strg+Umschalt+Z` zur Verfügung. Der Verlauf umfasst bis zu 100 Schritte.
 
+### Koordinatensystem
+
+- Wähle das **Koordinatensystem**-Werkzeug und klicke auf den gewünschten Ursprung.
+- Gib im Dialog Startwert, Endwert und Schrittweite in Zentimetern für x- und y-Achse an. Die Achsen erhalten Teilstriche, Zahlenbeschriftungen und Pfeile.
+- Standardmäßig reichen beide Achsen von 0 bis 10 cm in Einerschritten. Sie stehen an beiden Enden 5 mm über die Skala hinaus.
+- Das Koordinatensystem und seine Beschriftungen lassen sich wie gezeichnete Linien ganz oder teilweise radieren.
+
 ### Geodreieck
 
 Klicke auf die Geodreieck-Schaltfläche, um das Werkzeug ein- oder auszublenden. Ziehe es innerhalb der Fläche an eine andere Stelle. Am rechten Eck lässt es sich skalieren; der Griff über der Spitze dreht es.
