@@ -17,8 +17,8 @@ Lade `index.html` und `style.css` gemeinsam herunter und öffne `index.html` in 
 ### Koordinatensystem
 
 - Wähle das **Koordinatensystem**-Werkzeug und klicke auf den gewünschten Ursprung.
-- Gib im Dialog Startwert, Endwert und Schrittweite in Zentimetern für x- und y-Achse an. Die Achsen erhalten Teilstriche, Zahlenbeschriftungen und Pfeile.
-- Standardmäßig reichen beide Achsen von 0 bis 10 cm in Einerschritten. Sie stehen an beiden Enden 5 mm über die Skala hinaus.
+- Gib im Dialog Startwert und Endwert sowie den Abstand der Teilstriche in Kästchen und den Beschriftungsschritt für x- und y-Achse an. Zum Beispiel erzeugen 2 Kästchen Abstand und ein Beschriftungsschritt von 2 eine Beschriftung in Zweierschritten.
+- Standardmäßig reichen beide Achsen von 0 bis 10 in Einerschritten; die Teilstriche liegen 2 Kästchen auseinander. Sie stehen an beiden Enden 5 mm über die Skala hinaus.
 - Das Koordinatensystem und seine Beschriftungen lassen sich wie gezeichnete Linien ganz oder teilweise radieren.
 
 ### Geodreieck

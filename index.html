@@ -134,14 +134,16 @@
       <fieldset>
         <legend>x-Achse (cm)</legend>
         <label>Start <input name="xStart" type="number" step="any" value="0" required></label>
-        <label>Ende <input name="xEnd" type="number" step="any" value="5" required></label>
-        <label>Schrittweite <input name="xStep" type="number" min="0.01" step="any" value="1" required></label>
+        <label>Ende <input name="xEnd" type="number" step="any" value="10" required></label>
+        <label>Kästchen je Strich <input name="xTickSquares" type="number" min="1" step="1" value="2" required></label>
+        <label>Beschriftungsschritt <input name="xLabelStep" type="number" min="0.01" step="any" value="1" required></label>
       </fieldset>
       <fieldset>
         <legend>y-Achse (cm)</legend>
         <label>Start <input name="yStart" type="number" step="any" value="0" required></label>
-        <label>Ende <input name="yEnd" type="number" step="any" value="5" required></label>
-        <label>Schrittweite <input name="yStep" type="number" min="0.01" step="any" value="1" required></label>
+        <label>Ende <input name="yEnd" type="number" step="any" value="10" required></label>
+        <label>Kästchen je Strich <input name="yTickSquares" type="number" min="1" step="1" value="2" required></label>
+        <label>Beschriftungsschritt <input name="yLabelStep" type="number" min="0.01" step="any" value="1" required></label>
       </fieldset>
       <p id="coordinateError" role="alert"></p>
       <menu>
@@ -387,37 +389,51 @@
       }
 
       function makeCoordinateSystem(origin, values) {
-        const xStart = values.xStart * cm;
-        const xEnd = values.xEnd * cm;
-        const xStep = values.xStep * cm;
-        const yStart = values.yStart * cm;
-        const yEnd = values.yEnd * cm;
-        const yStep = values.yStep * cm;
+        const xLabelStep = values.xLabelStep;
+        const yLabelStep = values.yLabelStep;
+        const xTickDistance = values.xTickSquares * grid;
+        const yTickDistance = values.yTickSquares * grid;
+        const xWorldPerValue = xTickDistance / xLabelStep;
+        const yWorldPerValue = yTickDistance / yLabelStep;
         const overhang = cm / 2; // 5 mm
         const tickHalf = 5;
         const labels = [];
+        const countX = Math.floor((values.xEnd - values.xStart) / xLabelStep + 1e-9);
+        const countY = Math.floor((values.yEnd - values.yStart) / yLabelStep + 1e-9);
+        const xStartPosition = values.xStart * xWorldPerValue;
+        const xEndPosition = values.xEnd * xWorldPerValue;
+        const yStartPosition = values.yStart * yWorldPerValue;
+        const yEndPosition = values.yEnd * yWorldPerValue;
         const parts = [
-          [{ x: origin.x + xStart - overhang, y: origin.y }, { x: origin.x + xEnd + overhang, y: origin.y }],
-          [{ x: origin.x, y: origin.y - yStart + overhang }, { x: origin.x, y: origin.y - yEnd - overhang }],
-          [{ x: origin.x + xEnd + overhang - 12, y: origin.y - 6 }, { x: origin.x + xEnd + overhang, y: origin.y }, { x: origin.x + xEnd + overhang - 12, y: origin.y + 6 }],
-          [{ x: origin.x - 6, y: origin.y - yEnd - overhang + 12 }, { x: origin.x, y: origin.y - yEnd - overhang }, { x: origin.x + 6, y: origin.y - yEnd - overhang + 12 }]
+          [{ x: origin.x + xStartPosition - overhang, y: origin.y }, { x: origin.x + xEndPosition + overhang, y: origin.y }],
+          [{ x: origin.x, y: origin.y - yStartPosition + overhang }, { x: origin.x, y: origin.y - yEndPosition - overhang }],
+          [{ x: origin.x + xEndPosition + overhang - 12, y: origin.y - 6 }, { x: origin.x + xEndPosition + overhang, y: origin.y }, { x: origin.x + xEndPosition + overhang - 12, y: origin.y + 6 }],
+          [{ x: origin.x - 6, y: origin.y - yEndPosition - overhang + 12 }, { x: origin.x, y: origin.y - yEndPosition - overhang }, { x: origin.x + 6, y: origin.y - yEndPosition - overhang + 12 }]
         ];
         const format = value => String(Number(value.toFixed(6)));
 
-        const countX = Math.floor((values.xEnd - values.xStart) / values.xStep + 1e-9);
+        let hasZeroX = false;
         for (let i = 0; i <= countX; i++) {
-          const value = values.xStart + i * values.xStep;
-          const x = origin.x + value * cm;
+          const value = values.xStart + i * xLabelStep;
+          const x = origin.x + value * xWorldPerValue;
           parts.push([{ x, y: origin.y - tickHalf }, { x, y: origin.y + tickHalf }]);
-          labels.push({ x, y: origin.y + 19, text: format(value) });
+          if (Math.abs(value) < 1e-9) {
+            hasZeroX = true;
+            labels.push({ x: origin.x - 12, y: origin.y + 18, text: "0" });
+          } else {
+            labels.push({ x, y: origin.y + 19, text: format(value) });
+          }
         }
 
-        const countY = Math.floor((values.yEnd - values.yStart) / values.yStep + 1e-9);
         for (let i = 0; i <= countY; i++) {
-          const value = values.yStart + i * values.yStep;
-          const y = origin.y - value * cm;
+          const value = values.yStart + i * yLabelStep;
+          const y = origin.y - value * yWorldPerValue;
           parts.push([{ x: origin.x - tickHalf, y }, { x: origin.x + tickHalf, y }]);
-          labels.push({ x: origin.x - 19, y, text: format(value) });
+          if (Math.abs(value) < 1e-9) {
+            if (!hasZeroX) labels.push({ x: origin.x - 18, y: origin.y + 18, text: "0" });
+          } else {
+            labels.push({ x: origin.x - 19, y, text: format(value) });
+          }
         }
 
         return {
@@ -1092,6 +1108,10 @@ function startCompassDrawing(pointerWorld) {
       }
 
       canvas.addEventListener("pointerdown", e => {
+        if (e.button === 2) {
+          e.preventDefault();
+          return;
+        }
         canvas.setPointerCapture(e.pointerId);
         const screen = pointerPos(e);
         const world = screenToWorld(screen.x, screen.y);
@@ -1166,7 +1186,14 @@ function startCompassDrawing(pointerWorld) {
           const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
           if (dist(screen, scale) < 18) {
             recordUndo();
-            drag = { kind: "scale" }; return;
+            drag = {
+              kind: "scale",
+              pivot: localToWorld(ruler.w / 2, 0),
+              startW: ruler.w,
+              startH: ruler.h,
+              angle: ruler.angle
+            };
+            return;
           }
           if (dist(screen, rotate) < 18) {
             recordUndo();
@@ -1206,6 +1233,8 @@ function startCompassDrawing(pointerWorld) {
           draw();
         }
       });
+
+      canvas.addEventListener("contextmenu", event => event.preventDefault());
 
       canvas.addEventListener("pointerdown", updateCanvasCursor);
 
@@ -1276,10 +1305,16 @@ function startCompassDrawing(pointerWorld) {
         ruler.y = fixedZero.y - (zero.x * s + zero.y * c);
 
         } else if (drag?.kind === "scale") {
-          const local = worldToLocal(world);
-          const newW = Math.max(240, local.x);
-          ruler.h = ruler.h * (newW / ruler.w);
+          const dx = world.x - drag.pivot.x;
+          const dy = world.y - drag.pivot.y;
+          const localX = dx * Math.cos(drag.angle) + dy * Math.sin(drag.angle);
+          const newW = Math.max(240, localX * 2);
+          const scaleFactor = newW / drag.startW;
+          ruler.h = drag.startH * scaleFactor;
           ruler.w = newW;
+          ruler.angle = drag.angle;
+          ruler.x = drag.pivot.x - newW / 2 * Math.cos(drag.angle);
+          ruler.y = drag.pivot.y - newW / 2 * Math.sin(drag.angle);
         } else if (drag?.kind === "draw" && activeStroke) {
           const p = snapPoint(world, drag.rulerEdge);
           const part = activeStroke.parts[activeStroke.parts.length - 1];
@@ -1421,13 +1456,15 @@ function startCompassDrawing(pointerWorld) {
       coordinateForm.addEventListener("submit", event => {
         event.preventDefault();
         const formData = new FormData(coordinateForm);
-        const values = Object.fromEntries(["xStart", "xEnd", "xStep", "yStart", "yEnd", "yStep"]
+        const values = Object.fromEntries(["xStart", "xEnd", "xTickSquares", "xLabelStep", "yStart", "yEnd", "yTickSquares", "yLabelStep"]
           .map(name => [name, Number(formData.get(name))]));
         const valid = Object.values(values).every(Number.isFinite) &&
           values.xStart < values.xEnd && values.yStart < values.yEnd &&
-          values.xStep > 0 && values.yStep > 0 &&
-          (values.xEnd - values.xStart) / values.xStep <= 500 &&
-          (values.yEnd - values.yStart) / values.yStep <= 500;
+          Number.isInteger(values.xTickSquares) && Number.isInteger(values.yTickSquares) &&
+          values.xTickSquares > 0 && values.yTickSquares > 0 &&
+          values.xLabelStep > 0 && values.yLabelStep > 0 &&
+          (values.xEnd - values.xStart) / values.xLabelStep <= 500 &&
+          (values.yEnd - values.yStart) / values.yLabelStep <= 500;
         if (!valid) {
           document.querySelector("#coordinateError").textContent =
             "Bitte Start kleiner als Ende und positive Schrittweiten wählen (höchstens 500 Schritte je Achse).";
